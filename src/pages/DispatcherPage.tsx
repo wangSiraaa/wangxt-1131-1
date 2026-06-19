@@ -23,6 +23,11 @@ export default function DispatcherPage() {
   const handleCreateTask = () => {
     if (!selectedPoint || !taskDescription) return;
 
+    if (taskType === 'salvage' && !state.windInfo.suitableForSalvage) {
+      alert('当前风向条件不宜开展打捞作业，无法创建打捞任务');
+      return;
+    }
+
     const point = state.monitorPoints.find(p => p.id === selectedPoint);
     if (!point) return;
 
@@ -34,6 +39,11 @@ export default function DispatcherPage() {
       description: taskDescription,
       warningId: selectedWarningId
     });
+
+    if (!newTask) {
+      alert('任务创建失败，请检查风向条件');
+      return;
+    }
 
     if (selectedWarningId) {
       const warning = state.warnings.find(w => w.id === selectedWarningId);
@@ -71,7 +81,13 @@ export default function DispatcherPage() {
     });
   };
 
-  const openTaskModal = (warningId?: string) => {
+  const openTaskModal = (warningId?: string, type?: TaskType) => {
+    if (type === 'salvage' && !state.windInfo.suitableForSalvage) {
+      return;
+    }
+    if (type) {
+      setTaskType(type);
+    }
     if (warningId) {
       const warning = state.warnings.find(w => w.id === warningId);
       if (warning) {
@@ -81,8 +97,6 @@ export default function DispatcherPage() {
     }
     setShowTaskModal(true);
   };
-
-  const canSalvage = canDispatchSalvage();
 
   return (
     <div className="space-y-6">
@@ -100,14 +114,14 @@ export default function DispatcherPage() {
         </button>
       </div>
 
-      {!canSalvage && (
+      {!state.windInfo.suitableForSalvage && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-center gap-3">
           <AlertTriangle className="text-amber-500 flex-shrink-0" size={24} />
-          <div>
+          <div className="flex-1">
             <div className="font-medium text-amber-800">当前风向条件不宜开展打捞作业</div>
             <div className="text-sm text-amber-600">
               风向：{state.windInfo.direction}，风速：{state.windInfo.speed} m/s。
-              为确保作业安全，暂不支持派发打捞任务。
+              为确保作业安全，暂不支持派发打捞任务。可点击顶部风向信息进行设置。
             </div>
           </div>
         </div>
@@ -254,10 +268,7 @@ export default function DispatcherPage() {
             <h3 className="font-semibold text-gray-800 mb-3">快捷操作</h3>
             <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => {
-                  setTaskType('aeration');
-                  openTaskModal();
-                }}
+                onClick={() => openTaskModal(undefined, 'aeration')}
                 className="flex flex-col items-center gap-1 p-3 bg-cyan-50 hover:bg-cyan-100 rounded-lg transition-colors"
               >
                 <Wind size={24} className="text-cyan-600" />
@@ -265,18 +276,19 @@ export default function DispatcherPage() {
               </button>
               <button
                 onClick={() => {
-                  setTaskType('salvage');
-                  openTaskModal();
+                  if (state.windInfo.suitableForSalvage) {
+                    openTaskModal(undefined, 'salvage');
+                  }
                 }}
-                disabled={!canSalvage}
+                disabled={!state.windInfo.suitableForSalvage}
                 className={`flex flex-col items-center gap-1 p-3 rounded-lg transition-colors ${
-                  canSalvage
+                  state.windInfo.suitableForSalvage
                     ? 'bg-amber-50 hover:bg-amber-100'
                     : 'bg-gray-100 cursor-not-allowed opacity-60'
                 }`}
               >
-                <Ship size={24} className={canSalvage ? 'text-amber-600' : 'text-gray-400'} />
-                <span className={`text-sm ${canSalvage ? 'text-amber-700' : 'text-gray-400'}`}>
+                <Ship size={24} className={state.windInfo.suitableForSalvage ? 'text-amber-600' : 'text-gray-400'} />
+                <span className={`text-sm ${state.windInfo.suitableForSalvage ? 'text-amber-700' : 'text-gray-400'}`}>
                   派发打捞
                 </span>
               </button>
@@ -311,24 +323,33 @@ export default function DispatcherPage() {
                     曝气作业
                   </button>
                   <button
-                    onClick={() => canSalvage && setTaskType('salvage')}
-                    disabled={!canSalvage}
+                    onClick={() => {
+                      if (state.windInfo.suitableForSalvage) {
+                        setTaskType('salvage');
+                      }
+                    }}
+                    disabled={!state.windInfo.suitableForSalvage}
                     className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border transition-colors ${
                       taskType === 'salvage'
                         ? 'border-amber-500 bg-amber-50 text-amber-700'
-                        : canSalvage
+                        : state.windInfo.suitableForSalvage
                         ? 'border-gray-200 text-gray-600 hover:border-gray-300'
                         : 'border-gray-200 text-gray-400 cursor-not-allowed'
                     }`}
                   >
                     <Ship size={18} />
                     打捞作业
-                    {!canSalvage && <AlertCircle size={14} />}
+                    {!state.windInfo.suitableForSalvage && <AlertCircle size={14} />}
                   </button>
                 </div>
-                {!canSalvage && taskType === 'salvage' && (
+                {!state.windInfo.suitableForSalvage && taskType === 'salvage' && (
                   <p className="mt-1 text-xs text-amber-600">
-                    当前风向条件不宜开展打捞作业
+                    当前风向条件不宜开展打捞作业，请切换至曝气或调整风向条件
+                  </p>
+                )}
+                {!state.windInfo.suitableForSalvage && taskType !== 'salvage' && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    当前风向不宜打捞，如需请点击顶部风向信息进行调整
                   </p>
                 )}
               </div>
@@ -406,14 +427,14 @@ export default function DispatcherPage() {
               </button>
               <button
                 onClick={handleCreateTask}
-                disabled={!selectedPoint || !taskDescription || (taskType === 'salvage' && !canSalvage)}
+                disabled={!selectedPoint || !taskDescription || (taskType === 'salvage' && !state.windInfo.suitableForSalvage)}
                 className={`px-4 py-2 rounded-lg transition-colors ${
-                  selectedPoint && taskDescription && (taskType !== 'salvage' || canSalvage)
+                  selectedPoint && taskDescription && (taskType !== 'salvage' || state.windInfo.suitableForSalvage)
                     ? 'bg-blue-600 hover:bg-blue-700 text-white'
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 }`}
               >
-                派发任务
+                {taskType === 'salvage' && !state.windInfo.suitableForSalvage ? '风向不宜' : '派发任务'}
               </button>
             </div>
           </div>

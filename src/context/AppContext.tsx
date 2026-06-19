@@ -83,8 +83,10 @@ interface AppContextType {
   canDispatchSalvage: () => boolean;
   canCloseWarning: (warningId: string) => boolean;
   getLatestDensity: (pointId: string) => number | null;
-  createTask: (task: Omit<Task, 'id' | 'createTime' | 'status'>) => Task;
+  createTask: (task: Omit<Task, 'id' | 'createTime' | 'status'>) => Task | null;
   createWarning: (record: AlgaeRecord) => Warning | null;
+  updateWindInfo: (windInfo: Partial<{ direction: string; speed: number; suitableForSalvage: boolean }>) => void;
+  toggleWindSuitability: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -123,7 +125,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return `${prefix}${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
   };
 
-  const createTask = (taskData: Omit<Task, 'id' | 'createTime' | 'status'>): Task => {
+  const createTask = (taskData: Omit<Task, 'id' | 'createTime' | 'status'>): Task | null => {
+    if (taskData.type === 'salvage' && !state.windInfo.suitableForSalvage) {
+      console.warn('[createTask] 当前风向不适宜，无法创建打捞任务');
+      return null;
+    }
+
     const newTask: Task = {
       ...taskData,
       id: generateId('task'),
@@ -132,6 +139,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     dispatch({ type: 'ADD_TASK', payload: newTask });
     return newTask;
+  };
+
+  const updateWindInfo = (windInfo: Partial<{ direction: string; speed: number; suitableForSalvage: boolean }>) => {
+    const newWindInfo = {
+      ...state.windInfo,
+      ...windInfo,
+      updateTime: new Date().toISOString().replace('T', ' ').substring(0, 19)
+    };
+    dispatch({ type: 'UPDATE_WIND', payload: newWindInfo });
+  };
+
+  const toggleWindSuitability = () => {
+    const directions = ['东南风', '西北风', '东北风', '西南风', '南风', '北风'];
+    const randomDirection = directions[Math.floor(Math.random() * directions.length)];
+    const randomSpeed = Math.round((Math.random() * 6 + 1) * 10) / 10;
+    const newSuitable = !state.windInfo.suitableForSalvage;
+
+    const newWindInfo = {
+      direction: randomDirection,
+      speed: randomSpeed,
+      suitableForSalvage: newSuitable,
+      updateTime: new Date().toISOString().replace('T', ' ').substring(0, 19)
+    };
+    dispatch({ type: 'UPDATE_WIND', payload: newWindInfo });
   };
 
   const createWarning = (record: AlgaeRecord): Warning | null => {
@@ -170,7 +201,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       canCloseWarning,
       getLatestDensity,
       createTask,
-      createWarning
+      createWarning,
+      updateWindInfo,
+      toggleWindSuitability
     }}>
       {children}
     </AppContext.Provider>
