@@ -1,4 +1,4 @@
-import { Clock, Play, CheckCircle, XCircle, Wind, Ship } from 'lucide-react';
+import { Clock, Play, CheckCircle, XCircle, Wind, Ship, Fence, Camera } from 'lucide-react';
 import { Task, TaskStatus, TaskType } from '../types';
 
 interface TaskCardProps {
@@ -29,6 +29,8 @@ export default function TaskCard({ task, onStart, onComplete, onCancel, showActi
         return { label: '曝气作业', color: 'bg-cyan-100 text-cyan-700', icon: <Wind size={14} /> };
       case 'salvage':
         return { label: '打捞作业', color: 'bg-amber-100 text-amber-700', icon: <Ship size={14} /> };
+      case 'enclosure':
+        return { label: '围隔作业', color: 'bg-purple-100 text-purple-700', icon: <Fence size={14} /> };
     }
   };
 
@@ -75,6 +77,12 @@ export default function TaskCard({ task, onStart, onComplete, onCancel, showActi
             <span>完成：{task.finishTime.slice(11)}</span>
           )}
         </div>
+        {task.photos && task.photos.length > 0 && (
+          <div className="flex items-center gap-1">
+            <Camera size={12} className="text-gray-400" />
+            <span>{task.photos.length} 张</span>
+          </div>
+        )}
       </div>
 
       {task.result && (

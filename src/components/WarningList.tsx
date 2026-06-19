@@ -1,4 +1,4 @@
-import { AlertTriangle, AlertCircle, Bell, CheckCircle, XCircle } from 'lucide-react';
+import { AlertTriangle, AlertCircle, Bell, CheckCircle, XCircle, Zap, MapPin, Camera } from 'lucide-react';
 import { Warning, WarningLevel, WarningStatus } from '../types';
 
 interface WarningListProps {
@@ -58,11 +58,17 @@ export default function WarningList({ warnings, onClose, onRecheck, showActions 
             className={`p-4 rounded-lg border ${levelConfig.borderColor} ${levelConfig.bgColor} transition-all hover:shadow-md`}
           >
             <div className="flex items-start justify-between mb-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className={`w-2.5 h-2.5 rounded-full ${levelConfig.color} animate-pulse`}></span>
                 <span className={`text-sm font-medium ${levelConfig.textColor}`}>
                   {levelConfig.label}级预警
                 </span>
+                {warning.upgradedToDispatch && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-red-500 text-white text-xs rounded font-medium">
+                    <Zap size={10} />
+                    调度事件
+                  </span>
+                )}
                 <span className={`inline-flex items-center gap-1 text-xs ${statusConfig.color}`}>
                   {statusConfig.icon}
                   {statusConfig.label}
@@ -74,12 +80,41 @@ export default function WarningList({ warnings, onClose, onRecheck, showActions 
             <h4 className="font-medium text-gray-800 mb-1">{warning.pointName}</h4>
             <p className="text-sm text-gray-600 mb-2">{warning.description}</p>
 
-            <div className="flex items-center gap-4 text-xs text-gray-500">
+            <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
               <span>触发密度：<span className="font-medium text-gray-700">{warning.triggerDensity} 万个/L</span></span>
               <span>阈值：<span className="font-medium text-gray-700">{warning.threshold} 万个/L</span></span>
               <span>复测：<span className="font-medium text-gray-700">{warning.recheckCount} 次</span></span>
               <span>关联任务：<span className="font-medium text-gray-700">{warning.taskIds.length} 个</span></span>
+              {warning.upgradedToDispatch && (
+                <span className="text-red-600 font-medium">
+                  连续超标 {warning.consecutiveExceedCount} 次
+                </span>
+              )}
             </div>
+
+            {warning.affectedIntakeIds.length > 0 && (
+              <div className="mt-2 flex items-center gap-1 flex-wrap">
+                <MapPin size={12} className="text-red-400" />
+                <span className="text-xs text-gray-500">影响取水口：</span>
+                {warning.affectedIntakeIds.map(intakeId => {
+                  const intakeName = intakeId === 'intake-1' ? '第一水厂' :
+                    intakeId === 'intake-2' ? '第二水厂' :
+                    intakeId === 'intake-3' ? '工业园区' : intakeId;
+                  return (
+                    <span key={intakeId} className="px-1.5 py-0.5 bg-red-100 text-red-700 text-xs rounded font-medium">
+                      {intakeName}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            {warning.recheckPhotos && warning.recheckPhotos.length > 0 && (
+              <div className="mt-2 flex items-center gap-1">
+                <Camera size={12} className="text-green-500" />
+                <span className="text-xs text-green-600">已上传复测照片 {warning.recheckPhotos.length} 张</span>
+              </div>
+            )}
 
             {showActions && warning.status !== 'closed' && (
               <div className="mt-3 flex gap-2">
@@ -110,7 +145,7 @@ export default function WarningList({ warnings, onClose, onRecheck, showActions 
             {warning.status !== 'closed' && !canClose && showActions && onClose && (
               <p className="mt-2 text-xs text-gray-400 flex items-center gap-1">
                 <XCircle size={12} />
-                需完成复测且复测合格后方可关闭
+                需完成复测且复测合格+照片齐全后方可关闭
               </p>
             )}
           </div>

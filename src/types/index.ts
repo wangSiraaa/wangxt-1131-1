@@ -1,6 +1,6 @@
 export type Role = 'water' | 'dispatch' | 'salvage';
 
-export type TaskType = 'aeration' | 'salvage';
+export type TaskType = 'aeration' | 'salvage' | 'enclosure';
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 
@@ -14,6 +14,16 @@ export interface MonitorPoint {
   lat: number;
   lng: number;
   description: string;
+  downstreamIntakeIds: string[];
+}
+
+export interface WaterIntake {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  orgName: string;
+  status: 'normal' | 'affected';
 }
 
 export interface AlgaeRecord {
@@ -41,6 +51,7 @@ export interface Task {
   description: string;
   result?: string;
   warningId?: string;
+  photos?: string[];
 }
 
 export interface Warning {
@@ -57,6 +68,10 @@ export interface Warning {
   recheckCount: number;
   latestRecheckId?: string;
   description: string;
+  consecutiveExceedCount: number;
+  upgradedToDispatch: boolean;
+  affectedIntakeIds: string[];
+  recheckPhotos?: string[];
 }
 
 export interface RecheckRecord {
@@ -69,6 +84,7 @@ export interface RecheckRecord {
   operator: string;
   passed: boolean;
   remark?: string;
+  photos: string[];
 }
 
 export interface WindInfo {
@@ -81,6 +97,7 @@ export interface WindInfo {
 export interface AppState {
   currentRole: Role;
   monitorPoints: MonitorPoint[];
+  waterIntakes: WaterIntake[];
   algaeRecords: AlgaeRecord[];
   tasks: Task[];
   warnings: Warning[];

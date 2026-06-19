@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Wind, Ship, AlertTriangle, ClipboardList, Plus, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+import { Wind, Ship, AlertTriangle, ClipboardList, Plus, Clock, CheckCircle, AlertCircle, Zap, MapPin, Fence } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import MonitorMap from '../components/MonitorMap';
 import WarningList from '../components/WarningList';
@@ -7,7 +7,7 @@ import TaskCard from '../components/TaskCard';
 import { TaskType } from '../types';
 
 export default function DispatcherPage() {
-  const { state, dispatch, createTask, canDispatchSalvage, canCloseWarning } = useApp();
+  const { state, dispatch, createTask, canDispatchSalvage, canCloseWarning, getAffectedIntakes } = useApp();
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [taskType, setTaskType] = useState<TaskType>('aeration');
   const [selectedPoint, setSelectedPoint] = useState('');
@@ -19,6 +19,7 @@ export default function DispatcherPage() {
   const inProgressTasks = state.tasks.filter(t => t.status === 'in_progress');
   const completedTasks = state.tasks.filter(t => t.status === 'completed');
   const activeWarnings = state.warnings.filter(w => w.status !== 'closed');
+  const dispatchEvents = activeWarnings.filter(w => w.upgradedToDispatch);
 
   const handleCreateTask = () => {
     if (!selectedPoint || !taskDescription) return;
@@ -37,7 +38,8 @@ export default function DispatcherPage() {
       pointName: point.name,
       priority: taskPriority,
       description: taskDescription,
-      warningId: selectedWarningId
+      warningId: selectedWarningId,
+      photos: []
     });
 
     if (!newTask) {
@@ -79,6 +81,10 @@ export default function DispatcherPage() {
         closeTime: new Date().toISOString().replace('T', ' ').substring(0, 19)
       }
     });
+
+    warning.affectedIntakeIds.forEach(intakeId => {
+      dispatch({ type: 'UPDATE_INTAKE_STATUS', payload: { id: intakeId, status: 'normal' } });
+    });
   };
 
   const openTaskModal = (warningId?: string, type?: TaskType) => {
@@ -96,6 +102,14 @@ export default function DispatcherPage() {
       }
     }
     setShowTaskModal(true);
+  };
+
+  const getTaskTypeLabel = (type: TaskType) => {
+    switch (type) {
+      case 'aeration': return '曝气';
+      case 'salvage': return '打捞';
+      case 'enclosure': return '围隔';
+    }
   };
 
   return (
@@ -121,8 +135,82 @@ export default function DispatcherPage() {
             <div className="font-medium text-amber-800">当前风向条件不宜开展打捞作业</div>
             <div className="text-sm text-amber-600">
               风向：{state.windInfo.direction}，风速：{state.windInfo.speed} m/s。
-              为确保作业安全，暂不支持派发打捞任务。可点击顶部风向信息进行设置。
+              不可派发打捞任务，但可安排曝气或围隔处置。
             </div>
+          </div>
+        </div>
+      )}
+
+      {dispatchEvents.length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Zap className="text-red-500" size={20} />
+            <span className="font-bold text-red-800">调度事件（连续超标升级）</span>
+            <span className="px-2 py-0.5 bg-red-200 text-red-800 text-xs rounded-full font-medium">
+              {dispatchEvents.length}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {dispatchEvents.map(warning => {
+              const affectedIntakes = state.waterIntakes.filter(wi =>
+                warning.affectedIntakeIds.includes(wi.id)
+              );
+              return (
+                <div key={warning.id} className="p-3 bg-white rounded-lg border border-red-200">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-medium text-gray-800">{warning.pointName}</span>
+                    <span className="text-xs text-red-600">
+                      连续超标 {warning.consecutiveExceedCount} 次
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-600">{warning.description}</p>
+                  {affectedIntakes.length > 0 && (
+                    <div className="mt-2 flex items-center gap-1 flex-wrap">
+                      <MapPin size={12} className="text-red-400" />
+                      <span className="text-xs text-gray-500">影响取水口：</span>
+                      {affectedIntakes.map(wi => (
+                        <span key={wi.id} className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          wi.status === 'affected'
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {wi.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      onClick={() => openTaskModal(warning.id, 'aeration')}
+                      className="px-3 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 text-xs rounded-md border border-cyan-200 transition-colors"
+                    >
+                      派发曝气
+                    </button>
+                    <button
+                      onClick={() => openTaskModal(warning.id, 'enclosure')}
+                      className="px-3 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs rounded-md border border-purple-200 transition-colors"
+                    >
+                      派发围隔
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (state.windInfo.suitableForSalvage) {
+                          openTaskModal(warning.id, 'salvage');
+                        }
+                      }}
+                      disabled={!state.windInfo.suitableForSalvage}
+                      className={`px-3 py-1 text-xs rounded-md border transition-colors ${
+                        state.windInfo.suitableForSalvage
+                          ? 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
+                          : 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed'
+                      }`}
+                    >
+                      派发打捞
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -154,12 +242,12 @@ export default function DispatcherPage() {
 
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
-              <AlertTriangle size={20} className="text-orange-600" />
+            <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+              <Zap size={20} className="text-red-600" />
             </div>
             <div>
-              <div className="text-2xl font-bold text-gray-800">{activeWarnings.length}</div>
-              <div className="text-sm text-gray-500">活跃预警</div>
+              <div className="text-2xl font-bold text-gray-800">{dispatchEvents.length}</div>
+              <div className="text-sm text-gray-500">调度事件</div>
             </div>
           </div>
         </div>
@@ -258,21 +346,30 @@ export default function DispatcherPage() {
             <h3 className="font-semibold text-blue-800 mb-2">调度规则</h3>
             <ul className="text-sm text-blue-700 space-y-1">
               <li>• 藻密度 ≥ {state.densityThreshold} 万个/L 触发预警</li>
+              <li>• 连续2次超标升级为调度事件</li>
               <li>• 风向不适宜时不可派发打捞任务</li>
-              <li>• 处理后需复测合格方可关闭预警</li>
+              <li>• 不宜打捞时可安排曝气或围隔</li>
+              <li>• 处理后需复测+照片方可关闭</li>
               <li>• 紧急预警优先安排处理</li>
             </ul>
           </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
             <h3 className="font-semibold text-gray-800 mb-3">快捷操作</h3>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 onClick={() => openTaskModal(undefined, 'aeration')}
                 className="flex flex-col items-center gap-1 p-3 bg-cyan-50 hover:bg-cyan-100 rounded-lg transition-colors"
               >
                 <Wind size={24} className="text-cyan-600" />
-                <span className="text-sm text-cyan-700">派发曝气</span>
+                <span className="text-sm text-cyan-700">曝气</span>
+              </button>
+              <button
+                onClick={() => openTaskModal(undefined, 'enclosure')}
+                className="flex flex-col items-center gap-1 p-3 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
+              >
+                <Fence size={24} className="text-purple-600" />
+                <span className="text-sm text-purple-700">围隔</span>
               </button>
               <button
                 onClick={() => {
@@ -289,7 +386,7 @@ export default function DispatcherPage() {
               >
                 <Ship size={24} className={state.windInfo.suitableForSalvage ? 'text-amber-600' : 'text-gray-400'} />
                 <span className={`text-sm ${state.windInfo.suitableForSalvage ? 'text-amber-700' : 'text-gray-400'}`}>
-                  派发打捞
+                  打捞
                 </span>
               </button>
             </div>
@@ -302,7 +399,7 @@ export default function DispatcherPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
             <div className="bg-gradient-to-r from-blue-600 to-blue-500 px-6 py-4">
               <h3 className="text-lg font-semibold text-white">
-                派发{taskType === 'aeration' ? '曝气' : '打捞'}任务
+                派发{getTaskTypeLabel(taskType)}任务
               </h3>
               <p className="text-blue-100 text-sm">填写任务详情后下发执行</p>
             </div>
@@ -310,7 +407,7 @@ export default function DispatcherPage() {
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">任务类型</label>
-                <div className="flex gap-3">
+                <div className="flex gap-2">
                   <button
                     onClick={() => setTaskType('aeration')}
                     className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border transition-colors ${
@@ -320,7 +417,18 @@ export default function DispatcherPage() {
                     }`}
                   >
                     <Wind size={18} />
-                    曝气作业
+                    曝气
+                  </button>
+                  <button
+                    onClick={() => setTaskType('enclosure')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border transition-colors ${
+                      taskType === 'enclosure'
+                        ? 'border-purple-500 bg-purple-50 text-purple-700'
+                        : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    <Fence size={18} />
+                    围隔
                   </button>
                   <button
                     onClick={() => {
@@ -338,18 +446,13 @@ export default function DispatcherPage() {
                     }`}
                   >
                     <Ship size={18} />
-                    打捞作业
+                    打捞
                     {!state.windInfo.suitableForSalvage && <AlertCircle size={14} />}
                   </button>
                 </div>
-                {!state.windInfo.suitableForSalvage && taskType === 'salvage' && (
-                  <p className="mt-1 text-xs text-amber-600">
-                    当前风向条件不宜开展打捞作业，请切换至曝气或调整风向条件
-                  </p>
-                )}
                 {!state.windInfo.suitableForSalvage && taskType !== 'salvage' && (
                   <p className="mt-1 text-xs text-gray-500">
-                    当前风向不宜打捞，如需请点击顶部风向信息进行调整
+                    当前风向不宜打捞，可改选曝气或围隔处置
                   </p>
                 )}
               </div>

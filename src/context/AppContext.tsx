@@ -7,12 +7,14 @@ import {
   Warning,
   RecheckRecord,
   MonitorPoint,
+  WaterIntake,
   WarningLevel,
   WarningStatus,
   TaskStatus
 } from '../types';
 import {
   mockMonitorPoints,
+  mockWaterIntakes,
   mockAlgaeRecords,
   mockTasks,
   mockWarnings,
@@ -31,11 +33,13 @@ type Action =
   | { type: 'UPDATE_WARNING'; payload: Warning }
   | { type: 'ADD_RECHECK_RECORD'; payload: RecheckRecord }
   | { type: 'ADD_MONITOR_POINT'; payload: MonitorPoint }
-  | { type: 'UPDATE_WIND'; payload: typeof mockWindInfo };
+  | { type: 'UPDATE_WIND'; payload: typeof mockWindInfo }
+  | { type: 'UPDATE_INTAKE_STATUS'; payload: { id: string; status: 'normal' | 'affected' } };
 
 const initialState: AppState = {
   currentRole: 'water',
   monitorPoints: mockMonitorPoints,
+  waterIntakes: mockWaterIntakes,
   algaeRecords: mockAlgaeRecords,
   tasks: mockTasks,
   warnings: mockWarnings,
@@ -71,9 +75,22 @@ function appReducer(state: AppState, action: Action): AppState {
       return { ...state, monitorPoints: [...state.monitorPoints, action.payload] };
     case 'UPDATE_WIND':
       return { ...state, windInfo: action.payload };
+    case 'UPDATE_INTAKE_STATUS':
+      return {
+        ...state,
+        waterIntakes: state.waterIntakes.map(wi =>
+          wi.id === action.payload.id ? { ...wi, status: action.payload.status } : wi
+        )
+      };
     default:
       return state;
   }
+}
+
+interface ConsecutiveExceedResult {
+  consecutiveExceedCount: number;
+  upgradedToDispatch: boolean;
+  affectedIntakeIds: string[];
 }
 
 interface AppContextType {
@@ -87,6 +104,10 @@ interface AppContextType {
   createWarning: (record: AlgaeRecord) => Warning | null;
   updateWindInfo: (windInfo: Partial<{ direction: string; speed: number; suitableForSalvage: boolean }>) => void;
   toggleWindSuitability: () => void;
+  checkConsecutiveExceed: (pointId: string) => ConsecutiveExceedResult;
+  getAffectedIntakes: (pointId: string) => WaterIntake[];
+  getPointRecords: (pointId: string) => AlgaeRecord[];
+  getTreatmentTimePoints: (pointId: string) => { time: string; label: string }[];
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -110,7 +131,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!warning) return false;
     if (warning.recheckCount === 0) return false;
     const latestRecheck = state.recheckRecords.find(r => r.id === warning.latestRecheckId);
-    return latestRecheck?.passed ?? false;
+    if (!latestRecheck?.passed) return false;
+    if (!latestRecheck.photos || latestRecheck.photos.length === 0) return false;
+    return true;
   };
 
   const getLatestDensity = (pointId: string): number | null => {
@@ -125,6 +148,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return `${prefix}${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
   };
 
+  const checkConsecutiveExceed = (pointId: string): ConsecutiveExceedResult => {
+    const pointRecords = state.algaeRecords
+      .filter(r => r.pointId === pointId)
+      .sort((a, b) => new Date(b.measureTime).getTime() - new Date(a.measureTime).getTime());
+
+    let consecutiveExceedCount = 0;
+    for (const record of pointRecords) {
+      if (record.density >= state.densityThreshold) {
+        consecutiveExceedCount++;
+      } else {
+        break;
+      }
+    }
+
+    const upgradedToDispatch = consecutiveExceedCount >= 2;
+
+    const point = state.monitorPoints.find(p => p.id === pointId);
+    const affectedIntakeIds = point ? point.downstreamIntakeIds : [];
+
+    return { consecutiveExceedCount, upgradedToDispatch, affectedIntakeIds };
+  };
+
+  const getAffectedIntakes = (pointId: string): WaterIntake[] => {
+    const point = state.monitorPoints.find(p => p.id === pointId);
+    if (!point) return [];
+    return state.waterIntakes.filter(wi => point.downstreamIntakeIds.includes(wi.id));
+  };
+
+  const getPointRecords = (pointId: string): AlgaeRecord[] => {
+    return state.algaeRecords
+      .filter(r => r.pointId === pointId)
+      .sort((a, b) => new Date(a.measureTime).getTime() - new Date(b.measureTime).getTime());
+  };
+
+  const getTreatmentTimePoints = (pointId: string): { time: string; label: string }[] => {
+    const relatedTasks = state.tasks.filter(t => t.pointId === pointId && t.status === 'completed');
+    return relatedTasks.map(t => ({
+      time: t.finishTime || t.startTime || t.createTime,
+      label: t.type === 'aeration' ? '曝气处置' : t.type === 'salvage' ? '打捞处置' : '围隔处置'
+    }));
+  };
+
   const createTask = (taskData: Omit<Task, 'id' | 'createTime' | 'status'>): Task | null => {
     if (taskData.type === 'salvage' && !state.windInfo.suitableForSalvage) {
       console.warn('[createTask] 当前风向不适宜，无法创建打捞任务');
@@ -135,7 +200,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...taskData,
       id: generateId('task'),
       createTime: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      status: 'pending' as TaskStatus
+      status: 'pending' as TaskStatus,
+      photos: taskData.photos || []
     };
     dispatch({ type: 'ADD_TASK', payload: newTask });
     return newTask;
@@ -172,8 +238,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const existingWarning = state.warnings.find(
       w => w.pointId === record.pointId && w.status !== 'closed'
     );
-    if (existingWarning) return null;
+    if (existingWarning) {
+      const exceedResult = checkConsecutiveExceed(record.pointId);
+      const updatedWarning: Warning = {
+        ...existingWarning,
+        level: level === 'emergency' ? 'emergency' : existingWarning.level === 'warning' ? 'warning' : level,
+        consecutiveExceedCount: exceedResult.consecutiveExceedCount,
+        upgradedToDispatch: exceedResult.upgradedToDispatch || existingWarning.upgradedToDispatch,
+        affectedIntakeIds: exceedResult.affectedIntakeIds,
+        triggerDensity: record.density,
+        description: exceedResult.upgradedToDispatch
+          ? `${record.pointName}连续${exceedResult.consecutiveExceedCount}次超标，已升级为调度事件`
+          : existingWarning.description
+      };
+      dispatch({ type: 'UPDATE_WARNING', payload: updatedWarning });
 
+      if (exceedResult.upgradedToDispatch) {
+        exceedResult.affectedIntakeIds.forEach(intakeId => {
+          dispatch({ type: 'UPDATE_INTAKE_STATUS', payload: { id: intakeId, status: 'affected' } });
+        });
+      }
+
+      return updatedWarning;
+    }
+
+    const exceedResult = checkConsecutiveExceed(record.pointId);
     const threshold = level === 'emergency' ? state.emergencyThreshold : state.densityThreshold;
     const newWarning: Warning = {
       id: generateId('warn'),
@@ -186,9 +275,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createTime: new Date().toISOString().replace('T', ' ').substring(0, 19),
       taskIds: [],
       recheckCount: 0,
-      description: `${record.pointName}藻密度达到${level === 'emergency' ? '紧急' : level === 'warning' ? '预警' : '关注'}级别`
+      description: exceedResult.upgradedToDispatch
+        ? `${record.pointName}连续${exceedResult.consecutiveExceedCount}次超标，已升级为调度事件`
+        : `${record.pointName}藻密度达到${level === 'emergency' ? '紧急' : level === 'warning' ? '预警' : '关注'}级别`,
+      consecutiveExceedCount: exceedResult.consecutiveExceedCount,
+      upgradedToDispatch: exceedResult.upgradedToDispatch,
+      affectedIntakeIds: exceedResult.affectedIntakeIds,
+      recheckPhotos: []
     };
     dispatch({ type: 'ADD_WARNING', payload: newWarning });
+
+    if (exceedResult.upgradedToDispatch) {
+      exceedResult.affectedIntakeIds.forEach(intakeId => {
+        dispatch({ type: 'UPDATE_INTAKE_STATUS', payload: { id: intakeId, status: 'affected' } });
+      });
+    }
+
     return newWarning;
   };
 
@@ -203,7 +305,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createTask,
       createWarning,
       updateWindInfo,
-      toggleWindSuitability
+      toggleWindSuitability,
+      checkConsecutiveExceed,
+      getAffectedIntakes,
+      getPointRecords,
+      getTreatmentTimePoints
     }}>
       {children}
     </AppContext.Provider>
